@@ -1,0 +1,45 @@
+Entername: Build Sora Editor Sample App
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-sample:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ سحب المشروع كامل (fork)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # 2️⃣ تثبيت Java 17 (إلزامي للمشروع)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 3️⃣ إعداد Gradle (كاش + تسريع)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # 4️⃣ إعطاء صلاحية التنفيذ
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 5️⃣ بناء التطبيق التجريبي فقط
+      # ⚠️ لا تستخدم assembleDebug العام
+      - name: Build sample app (debug)
+        run: ./gradlew :app:assembleDebug
+
+      # 6️⃣ رفع ملف APK
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sora-editor-sample-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
