@@ -132,6 +132,11 @@ class MainActivity : AppCompatActivity() {
 
         private const val TAG = "MainActivity"
         const val LOG_FILE = "crash-journal.log"
+          //👉👉👉
+        private const val TABS_PREFS = "tabs_prefs"
+        private const val TABS_KEY = "tabs_data"
+        private const val CURRENT_TAB_KEY = "current_tab"
+          //👉👉👉
 
         /**
          * Symbols to be displayed in symbol input view
@@ -160,6 +165,22 @@ class MainActivity : AppCompatActivity() {
     private var searchOptions = SearchOptions(false, false)
     private var undo: MenuItem? = null
     private var redo: MenuItem? = null
+    
+      //👉👉👉
+    // إضافة متغيرات Tabs
+    private val tabs = mutableListOf<TabData>()
+    private var currentTabIndex = 0
+    private lateinit var tabLayout: TabLayout
+    private lateinit var prefs: SharedPreferences
+      //👉👉👉
+        //👉👉👉
+      data class TabData(
+        var id: String,
+        var name: String,
+        var content: String,
+        var isModified: Boolean = false
+    )
+      //👉👉👉
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
