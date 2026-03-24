@@ -13,7 +13,7 @@
         android:textColor="?attr/colorOnPrimary" />
 
     <ImageView
-        android:id="@id/tab_close_icon"
+        android:id="@+id/tab_close_icon"
         android:layout_width="24dp"
         android:layout_height="24dp"
         android:src="@drawable/ic_close_white"
