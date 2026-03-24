@@ -47,6 +47,17 @@
                 android:id="@+id/activity_toolbar" />
 
         </com.google.android.material.appbar.AppBarLayout>
+        
+         <com.google.android.material.tabs.TabLayout
+    android:id="@+id/tab_layout"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/colorPrimary"
+    app:tabMode="scrollable"
+    app:tabGravity="start"
+    app:tabTextColor="?attr/colorOnPrimary"
+    app:tabSelectedTextColor="?attr/colorOnPrimary"
+    app:tabIndicatorColor="?attr/colorOnPrimary" />
 
         <LinearLayout
             android:id="@+id/search_panel"
