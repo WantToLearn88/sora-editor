@@ -35,22 +35,16 @@ import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.EditText
 import android.widget.PopupMenu
 import android.widget.Toast
+import com.google.android.material.tabs.TabLayout
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import androidx.activity.result.contract.ActivityResultContracts.GetContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.savedstate.write
-
-import androidx.fragment.app.Fragment
-import androidx.fragment.app.FragmentActivity
-import androidx.lifecycle.lifecycleScope
-import androidx.viewpager2.adapter.FragmentStateAdapter
-import androidx.viewpager2.widget.ViewPager2
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.tabs.TabLayout
-import com.google.android.material.tabs.TabLayoutMediator
-
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.dingyi222666.monarch.languages.JavaLanguage
 import io.github.dingyi222666.monarch.languages.KotlinLanguage
@@ -170,10 +164,10 @@ class MainActivity : AppCompatActivity() {
     private var searchOptions = SearchOptions(false, false)
     private var undo: MenuItem? = null
     private var redo: MenuItem? = null
-    
-     // ViewPager2 and Tabs
+
+    // Tabs logic fields
     private val tabs = mutableListOf<TabInfo>()
-    private lateinit var tabAdapter: TabAdapter
+    private var currentTabIndex = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -185,23 +179,8 @@ class MainActivity : AppCompatActivity() {
         applyEdgeToEdge(this, binding.toolbarContainer, binding.root)
 
         val typeface = Typeface.createFromAsset(assets, "JetBrainsMono-Regular.ttf")
-        
-         // Initialize Tabs
-        loadTabs()
-        if (tabs.isEmpty()) {
-            tabs.add(TabInfo("Untitled 1", ""))
-        }
 
-        tabAdapter = TabAdapter(this, tabs)
-        binding.viewPager.adapter = tabAdapter
-        binding.viewPager.offscreenPageLimit = 3
-
-        TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
-            tab.text = tabs[position].title
-        }.attach()
-
-        // Handle Add Tab Button (Last Tab as +)
-        setupAddTabButton()
+        setupTabs()
 
 
         // Setup Listeners
@@ -355,119 +334,6 @@ class MainActivity : AppCompatActivity() {
 
         switchThemeIfRequired(this, binding.editor)
         computeSearchOptions()
-    } //oncreate
-    
-    private fun setupAddTabButton() {
-        binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: TabLayout.Tab?) {
-                if (tab?.text == "+") {
-                    addNewTab("Untitled ${tabs.size + 1}", "")
-                } else {
-                    updatePositionText()
-                    updateSymbolInputBinding()
-                }
-            }
-            override fun onTabUnselected(tab: TabLayout.Tab?) {}
-            override fun onTabReselected(tab: TabLayout.Tab?) {
-                if (tab?.text != "+") {
-                    showTabOptionsDialog(tab?.position ?: 0)
-                }
-            }
-        })
-        refreshTabLayout()
-    }
-
-    private fun refreshTabLayout() {
-        // Re-attach mediator or manually manage
-        binding.tabLayout.post {
-            if (binding.tabLayout.tabCount > 0 && binding.tabLayout.getTabAt(binding.tabLayout.tabCount - 1)?.text != "+") {
-                binding.tabLayout.addTab(binding.tabLayout.newTab().setText("+"))
-            }
-        }
-    }
-
-    private fun addNewTab(title: String, content: String) {
-        tabs.add(TabInfo(title, content))
-        tabAdapter.notifyItemInserted(tabs.size - 1)
-        binding.viewPager.setCurrentItem(tabs.size - 1, true)
-        saveTabs()
-        refreshTabLayout()
-    }
-
-    private fun showTabOptionsDialog(position: Int) {
-        if (position >= tabs.size) return
-        val options = arrayOf("Rename", "Delete")
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Tab Options")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> showRenameDialog(position)
-                    1 -> showDeleteConfirmDialog(position)
-                }
-            }
-            .show()
-    }
-
-    private fun showRenameDialog(position: Int) {
-        val input = EditText(this)
-        input.setText(tabs[position].title)
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Rename Tab")
-            .setView(input)
-            .setPositiveButton("OK") { _, _ ->
-                val newName = input.text.toString()
-                if (newName.isNotEmpty()) {
-                    tabs[position].title = newName
-                    binding.tabLayout.getTabAt(position)?.text = newName
-                    saveTabs()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showDeleteConfirmDialog(position: Int) {
-        if (tabs.size <= 1) {
-            toast("Cannot delete the last tab")
-            return
-        }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Delete Tab")
-            .setMessage("Are you sure you want to delete this tab?")
-            .setPositiveButton("Delete") { _, _ ->
-                tabs.removeAt(position)
-                tabAdapter.notifyItemRemoved(position)
-                saveTabs()
-                refreshTabLayout()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    fun onEditorContentChanged(content: String) {
-        val index = binding.viewPager.currentItem
-        if (index >= 0 && index < tabs.size) {
-            tabs[index].content = content
-            saveTabs()
-        }
-    }
-
-    fun updatePositionText() {
-        getCurrentEditor()?.let {
-            val cursor = it.cursor
-            binding.positionDisplay.text = "Line ${cursor.line + 1}, Column ${cursor.column + 1} | Chars: ${it.text.length}"
-        }
-    }
-
-    private fun updateSymbolInputBinding() {
-        getCurrentEditor()?.let {
-            binding.symbolInput.bindEditor(it)
-        }
-    }
-
-    private fun getCurrentEditor(): CodeEditor? {
-        val fragment = supportFragmentManager.findFragmentByTag("f${binding.viewPager.currentItem}") as? EditorFragment
-        return fragment?.editor
     }
 
     /**
@@ -1309,11 +1175,128 @@ class MainActivity : AppCompatActivity() {
             e.printStackTrace()
         }
     }
-    
+
+    // --- Tabs Management Logic ---
+
+    private fun setupTabs() {
+        loadTabs()
+        if (tabs.isEmpty()) {
+            addNewTab("Untitled 1", "")
+        } else {
+            refreshTabLayout()
+        }
+
+        binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab?) {
+                val position = tab?.position ?: return
+                if (position == tabs.size) { // Add button
+                    addNewTab("Untitled ${tabs.size + 1}", "")
+                } else {
+                    switchTab(position)
+                }
+            }
+
+            override fun onTabUnselected(tab: TabLayout.Tab?) {
+                val position = tab?.position ?: return
+                if (position < tabs.size) {
+                    tabs[position].content = binding.editor.text.toString()
+                }
+            }
+
+            override fun onTabReselected(tab: TabLayout.Tab?) {}
+        })
+
+        // Initial selection
+        if (currentTabIndex >= 0 && currentTabIndex < tabs.size) {
+            binding.tabLayout.getTabAt(currentTabIndex)?.select()
+            binding.editor.setText(tabs[currentTabIndex].content)
+        }
+    }
+
+    private fun addNewTab(title: String, content: String) {
+        val newTab = TabInfo(title, content)
+        tabs.add(newTab)
+        refreshTabLayout()
+        binding.tabLayout.getTabAt(tabs.size - 1)?.select()
+        saveTabs()
+    }
+
+    private fun switchTab(index: Int) {
+        if (index == currentTabIndex) return
+        currentTabIndex = index
+        binding.editor.setText(tabs[index].content)
+    }
+
+    private fun refreshTabLayout() {
+        binding.tabLayout.removeAllTabs()
+        for (tabInfo in tabs) {
+            val tab = binding.tabLayout.newTab().setText(tabInfo.title)
+            binding.tabLayout.addTab(tab)
+            
+            // Setup long click for rename and close icon (simplified approach)
+            tab.view.setOnLongClickListener {
+                showTabOptionsDialog(tab.position)
+                true
+            }
+        }
+        // Add button
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText("+"))
+    }
+
+    private fun showTabOptionsDialog(position: Int) {
+        val options = arrayOf("Rename", "Delete")
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Tab Options")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showRenameDialog(position)
+                    1 -> showDeleteConfirmDialog(position)
+                }
+            }
+            .show()
+    }
+
+    private fun showRenameDialog(position: Int) {
+        val input = EditText(this)
+        input.setText(tabs[position].title)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Rename Tab")
+            .setView(input)
+            .setPositiveButton("OK") { _, _ ->
+                val newName = input.text.toString()
+                if (newName.isNotEmpty()) {
+                    tabs[position].title = newName
+                    binding.tabLayout.getTabAt(position)?.text = newName
+                    saveTabs()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showDeleteConfirmDialog(position: Int) {
+        if (tabs.size <= 1) {
+            toast("Cannot delete the last tab")
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Delete Tab")
+            .setMessage("Are you sure you want to delete this tab?")
+            .setPositiveButton("Delete") { _, _ ->
+                tabs.removeAt(position)
+                if (currentTabIndex >= tabs.size) currentTabIndex = tabs.size - 1
+                refreshTabLayout()
+                binding.tabLayout.getTabAt(currentTabIndex)?.select()
+                saveTabs()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun saveTabs() {
         val prefs = getSharedPreferences("sora_editor_prefs", MODE_PRIVATE)
         val json = Gson().toJson(tabs)
-        prefs.edit().putString("saved_tabs", json).apply()
+        prefs.edit().putString("saved_tabs", json).putInt("last_tab_index", currentTabIndex).apply()
     }
 
     private fun loadTabs() {
@@ -1323,14 +1306,17 @@ class MainActivity : AppCompatActivity() {
             val type = object : TypeToken<MutableList<TabInfo>>() {}.type
             tabs.clear()
             tabs.addAll(Gson().fromJson(json, type))
+            currentTabIndex = prefs.getInt("last_tab_index", 0)
         }
     }
-    
-        data class TabInfo(var title: String, var content: String)
 
-    class TabAdapter(activity: FragmentActivity, private val tabs: List<TabInfo>) : FragmentStateAdapter(activity) {
-        override fun getItemCount(): Int = tabs.size
-        override fun createFragment(position: Int): Fragment = EditorFragment.newInstance(tabs[position].content)
+    override fun onPause() {
+        super.onPause()
+        if (currentTabIndex >= 0 && currentTabIndex < tabs.size) {
+            tabs[currentTabIndex].content = binding.editor.text.toString()
+        }
+        saveTabs()
     }
 
+    data class TabInfo(var title: String, var content: String)
 }
