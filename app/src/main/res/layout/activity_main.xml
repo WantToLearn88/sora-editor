@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -28,12 +29,11 @@
             android:id="@+id/tab_layout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?attr/colorPrimary"
+            android:background="?attr/colorSurfaceContainer"
             app:tabMode="scrollable"
             app:tabGravity="start"
-            app:tabTextColor="?attr/colorOnPrimary"
-            app:tabSelectedTextColor="?attr/colorOnPrimary"
-            app:tabIndicatorColor="?attr/colorOnPrimary" />
+            app:tabIndicatorColor="?attr/colorPrimary"
+            app:tabSelectedTextColor="?attr/colorPrimary" />
 
         <LinearLayout
             android:id="@+id/search_panel"
@@ -105,16 +105,10 @@
 
         </LinearLayout>
 
-        <io.github.rosemoe.sora.widget.CodeEditor
-            android:id="@+id/editor"
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/view_pager"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            app:scrollbarThumbHorizontal="@drawable/scrollbar_thumb"
-            app:scrollbarThumbVertical="@drawable/scrollbar_thumb"
-            app:scrollbarTrackHorizontal="@drawable/scrollbar_track"
-            app:scrollbarTrackVertical="@drawable/scrollbar_track"
-            app:lnPanelPosition="center"
-            app:lnPanelPositionMode="follow" />
+            android:layout_height="match_parent" />
 
     </LinearLayout>
 
