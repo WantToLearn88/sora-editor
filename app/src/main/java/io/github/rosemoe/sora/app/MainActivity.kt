@@ -23,6 +23,7 @@
  ******************************************************************************/
 package io.github.rosemoe.sora.app
 
+import android.content.Context
 import android.content.DialogInterface
 import android.graphics.Typeface
 import android.net.Uri
@@ -32,15 +33,25 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.PopupMenu
+import android.widget.TextView
 import android.widget.Toast
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
+import androidx.viewpager2.adapter.FragmentStateAdapter
+import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
+import com.google.android.material.tabs.TabLayoutMediator
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+
 import androidx.activity.result.contract.ActivityResultContracts.GetContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -165,9 +176,12 @@ class MainActivity : AppCompatActivity() {
     private var undo: MenuItem? = null
     private var redo: MenuItem? = null
 
-    // Tabs logic fields
+    private lateinit var viewPager: ViewPager2
+    private lateinit var tabLayout: TabLayout
+    private lateinit var tabAdapter: TabAdapter
     private val tabs = mutableListOf<TabInfo>()
-    private var currentTabIndex = -1
+    private var currentTabId = 0L
+    private var currentEditor: CodeEditor? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -180,7 +194,7 @@ class MainActivity : AppCompatActivity() {
 
         val typeface = Typeface.createFromAsset(assets, "JetBrainsMono-Regular.ttf")
 
-        setupTabs()
+
 
 
         // Setup Listeners
@@ -231,8 +245,9 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        // Configure editor
-        binding.editor.apply {
+        // The main editor is now managed by fragments, so this block is removed or adapted.
+        // Editor configurations will be applied to each EditorFragment's editor instance.
+        // The initial setup for the current editor is done within the onCreate after ViewPager initialization.
             registerInlayHintRenderers(
                 TextInlayHintRenderer.DefaultInstance,
                 ColorInlayHintRenderer.DefaultInstance
@@ -1218,7 +1233,6 @@ class MainActivity : AppCompatActivity() {
         tabs.add(newTab)
         refreshTabLayout()
         binding.tabLayout.getTabAt(tabs.size - 1)?.select()
-        saveTabs()
     }
 
     private fun switchTab(index: Int) {
@@ -1319,4 +1333,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     data class TabInfo(var title: String, var content: String)
+}
+
+data class TabInfo(var id: Long, var title: String, var content: String)
+
+class TabAdapter(fragmentActivity: FragmentActivity, private val tabs: MutableList<TabInfo>) : FragmentStateAdapter(fragmentActivity) {
+
+    private val fragmentMap = mutableMapOf<Int, EditorFragment>()
+
+    override fun getItemCount(): Int = tabs.size
+
+    override fun createFragment(position: Int): Fragment {
+        val fragment = EditorFragment.newInstance(tabs[position].content)
+        fragmentMap[position] = fragment
+        return fragment
+    }
+
+    fun getFragment(position: Int): Fragment? {
+        return fragmentMap[position]
+    }
 }
