@@ -303,7 +303,7 @@ class MainActivity : AppCompatActivity() {
             if (textSize > 0f) {
                 editor.textSizePx = textSize
             }
-            editor.setText(savedText)
+           // editor.setText(savedText)
             val left = savedInstanceState.getInt("position.left").coerceIn(0, editor.text.length)
             val right = savedInstanceState.getInt("position.right").coerceIn(0, editor.text.length)
             val leftPos = editor.text.indexer.getCharPosition(left.coerceAtMost(right))
