@@ -354,7 +354,17 @@ class MainActivity : AppCompatActivity() {
 
         switchThemeIfRequired(this, binding.editor)
         computeSearchOptions()
-    }
+        
+        loadTabs() // تحميل التبويبات المحفوظة
+        setupViewPager()
+        setupTabLayout()
+        
+        // إضافة تبويب افتراضي إذا كانت القائمة فارغة
+        if (tabs.isEmpty()) {
+            addNewTab("New File.java")
+        }
+        
+    } //👉👉onCreate 
 
     /**
      * Generate new [SearchOptions] for text searching in editor
@@ -1193,6 +1203,162 @@ class MainActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+    
+    private fun setupViewPager() {
+        adapter = EditorTabsAdapter(tabs) { position, content ->
+            // تحديث المحتوى عند التغيير لضمان الحفظ
+            if (position >= 0 && position < tabs.size) {
+                tabs[position].content = content
+                saveTabs()
+            }
+        }
+        binding.viewPager.adapter = adapter
+        binding.viewPager.offscreenPageLimit = 5
+    }
+
+    private fun setupTabLayout() {
+        // تم التأكد من وجود استيراد واحد فقط لـ TabLayout لتجنب Ambiguous error
+        TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
+            if (position < tabs.size) {
+                tab.text = tabs[position].title
+            }
+        }.attach()
+
+        // تنفيذ الضغط المطول على التبويبات بعد رسم الواجهة
+        binding.tabLayout.post { setupTabLongClicks() }
+    }
+
+    private fun setupTabLongClicks() {
+        val tabStrip = binding.tabLayout.getChildAt(0) as ViewGroup
+        for (i in 0 until tabStrip.childCount) {
+            tabStrip.getChildAt(i).setOnLongClickListener {
+                showTabOptionsDialog(i)
+                true
+            }
+        }
+    }
+
+    private fun addNewTab(title: String) {
+        val newTab = EditorTab(title = title)
+        tabs.add(newTab)
+        adapter.notifyItemInserted(tabs.size - 1)
+        binding.viewPager.currentItem = tabs.size - 1
+        saveTabs()
+        binding.tabLayout.post { setupTabLongClicks() }
+    }
+
+    private fun showTabOptionsDialog(position: Int) {
+        if (position < 0 || position >= tabs.size) return
+        
+        val options = arrayOf("إعادة تسمية", "حذف التبويب")
+        MaterialAlertDialogBuilder(this)
+            .setTitle("خيارات التبويب: ${tabs[position].title}")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showRenameDialog(position)
+                    1 -> showDeleteConfirmDialog(position)
+                }
+            }
+            .show()
+    }
+
+    private fun showRenameDialog(position: Int) {
+        val input = EditText(this)
+        input.setText(tabs[position].title)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("إعادة تسمية التبويب")
+            .setView(input)
+            .setPositiveButton("حفظ") { _, _ ->
+                val newName = input.text.toString()
+                if (newName.isNotEmpty()) {
+                    tabs[position].title = newName
+                    binding.tabLayout.getTabAt(position)?.text = newName
+                    saveTabs()
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun showDeleteConfirmDialog(position: Int) {
+        if (tabs.size <= 1) {
+            Toast.makeText(this, "لا يمكن حذف آخر تبويب", Toast.LENGTH_SHORT).show()
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("حذف التبويب")
+            .setMessage("هل أنت متأكد من حذف '${tabs[position].title}'؟")
+            .setPositiveButton("حذف") { _, _ ->
+                tabs.removeAt(position)
+                adapter.notifyItemRemoved(position)
+                saveTabs()
+                binding.tabLayout.post { setupTabLongClicks() }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun saveTabs() {
+        val prefs = getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
+        val json = gson.toJson(tabs)
+        prefs.edit().putString("saved_tabs", json).apply()
+    }
+
+    private fun loadTabs() {
+        val prefs = getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
+        val json = prefs.getString("saved_tabs", null)
+        if (json != null) {
+            try {
+                val type = object : TypeToken<MutableList<EditorTab>>() {}.type
+                val savedTabs: MutableList<EditorTab> = gson.fromJson(json, type)
+                tabs.clear()
+                tabs.addAll(savedTabs)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    inner class EditorTabsAdapter(
+        private val tabsList: List<EditorTab>,
+        private val onContentChanged: (Int, String) -> Unit
+    ) : RecyclerView.Adapter<EditorTabsAdapter.EditorViewHolder>() {
+
+        inner class EditorViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+            val editor: CodeEditor = view.findViewById(R.id.editor)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EditorViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.layout_editor_item, parent, false)
+            return EditorViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: EditorViewHolder, position: Int) {
+            val tab = tabsList[position]
+            val editor = holder.editor
+            
+            editor.setText(tab.content)
+            setupEditorConfiguration(editor)
+            
+            editor.subscribeAlways(ContentChangeEvent::class.java) {
+                onContentChanged(holder.adapterPosition, editor.text.toString())
+            }
+        }
+
+        override fun getItemCount(): Int = tabsList.size
+
+        private fun setupEditorConfiguration(editor: CodeEditor) {
+            editor.colorScheme = SchemeDarcula()
+            editor.typefaceText = Typeface.MONOSPACE
+            editor.textSize = 14f
+            editor.setEditorLanguage(JavaLanguage())
+            editor.getComponent(EditorAutoCompletion::class.java).isEnabled = true
+            editor.getComponent(Magnifier::class.java).isEnabled = true
+            editor.isWordwrap = false
+            editor.setOverScrollEnabled(false)
+            editor.setLineNumberEnabled(true)
         }
     }
 
