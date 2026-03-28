@@ -326,7 +326,7 @@ class MainActivity : AppCompatActivity() {
             editor.postInvalidate()
         } else {
             // Open assets file
-            openAssetsFile("samples/sample.txt")
+         //   openAssetsFile("samples/sample.txt")
         }
 
         updatePositionText()
