@@ -23,6 +23,7 @@
  ******************************************************************************/
 package io.github.rosemoe.sora.app
 
+import android.content.Context
 import android.content.DialogInterface
 import android.graphics.Typeface
 import android.net.Uri
@@ -35,31 +36,17 @@ import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts.GetContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import androidx.savedstate.write
-
-import androidx.fragment.app.Fragment
-import androidx.fragment.app.FragmentActivity
-import androidx.lifecycle.lifecycleScope
-import androidx.viewpager2.adapter.FragmentStateAdapter
-import androidx.viewpager2.widget.ViewPager2
-import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
-import com.google.android.material.tabs.TabLayoutMediator
-import java.util.UUID // إصلاح خطأ Unresolved reference 'UUID'
-import java.util.ArrayList
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import android.view.LayoutInflater
-import android.view.ViewGroup
-import android.content.Context
-import android.widget.EditText
-
 import io.github.dingyi222666.monarch.languages.JavaLanguage
 import io.github.dingyi222666.monarch.languages.KotlinLanguage
 import io.github.dingyi222666.monarch.languages.PythonLanguage
@@ -89,7 +76,7 @@ import io.github.rosemoe.sora.lang.styling.color.ConstColor
 import io.github.rosemoe.sora.lang.styling.inlayHint.ColorInlayHint
 import io.github.rosemoe.sora.lang.styling.inlayHint.InlayHintsContainer
 import io.github.rosemoe.sora.lang.styling.inlayHint.TextInlayHint
-import io.github.rosemoe.sora.langs.java.JavaLanguage
+import io.github.rosemoe.sora.langs.java.JavaLanguage as JavaLanguageV2
 import io.github.rosemoe.sora.langs.monarch.MonarchColorScheme
 import io.github.rosemoe.sora.langs.monarch.MonarchLanguage
 import io.github.rosemoe.sora.langs.monarch.registry.MonarchGrammarRegistry
@@ -134,18 +121,18 @@ import kotlinx.coroutines.withContext
 import org.eclipse.tm4e.core.registry.IGrammarSource
 import org.eclipse.tm4e.core.registry.IThemeSource
 import java.util.regex.PatternSyntaxException
+import java.util.UUID
 
-/**
- * Demo and debug Activity for the code editor
- */
- 
- // كلاس لتمثيل بيانات التبويب
+// كلاس لتمثيل بيانات التبويب
 data class EditorTab(
     var id: String = UUID.randomUUID().toString(),
     var title: String,
     var content: String = ""
 )
- 
+
+/**
+ * Demo and debug Activity for the code editor
+ */
 class MainActivity : AppCompatActivity() {
 
     companion object {
@@ -186,10 +173,11 @@ class MainActivity : AppCompatActivity() {
     private var searchOptions = SearchOptions(false, false)
     private var undo: MenuItem? = null
     private var redo: MenuItem? = null
-    
+
+    // --- Tab System Variables ---
     private val tabs = mutableListOf<EditorTab>()
-    private lateinit var adapter: EditorTabsAdapter
     private val gson = Gson()
+    private var isUpdatingTabs = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -201,7 +189,6 @@ class MainActivity : AppCompatActivity() {
         applyEdgeToEdge(this, binding.toolbarContainer, binding.root)
 
         val typeface = Typeface.createFromAsset(assets, "JetBrainsMono-Regular.ttf")
-
 
         // Setup Listeners
         binding.apply {
@@ -258,268 +245,229 @@ class MainActivity : AppCompatActivity() {
                 ColorInlayHintRenderer.DefaultInstance
             )
             typefaceText = typeface
-            props.stickyScroll = true
+            props.deleteMultiSpaces = 1
             setLineSpacing(2f, 1.1f)
             nonPrintablePaintingFlags =
-                CodeEditor.FLAG_DRAW_WHITESPACE_LEADING or CodeEditor.FLAG_DRAW_LINE_SEPARATOR or CodeEditor.FLAG_DRAW_WHITESPACE_IN_SELECTION or CodeEditor.FLAG_DRAW_SOFT_WRAP
-            // Update display dynamically
-            // Use CodeEditor#subscribeEvent to add listeners of different events to editor
-            subscribeAlways<SelectionChangeEvent> { updatePositionText() }
-            subscribeAlways<PublishSearchResultEvent> { updatePositionText() }
-            subscribeAlways<ContentChangeEvent> {
-                postDelayedInLifecycle(
-                    ::updateBtnState,
-                    50
-                )
-            }
-            subscribeAlways<SideIconClickEvent> {
-                toast(R.string.tip_side_icon)
-            }
-            subscribeAlways<InlayHintClickEvent> {
-                toast(R.string.tip_inlay_hint)
-            }
-            subscribeAlways<TextSizeChangeEvent> { event ->
-                Log.d(
-                    TAG,
-                    "TextSizeChangeEvent onReceive() called with: oldTextSize = [${event.oldTextSize}], newTextSize = [${event.newTextSize}]"
-                )
-            }
+                CodeEditor.FLAG_DRAW_WHITESPACE_LEADING or CodeEditor.FLAG_DRAW_LINE_SEPARATOR or CodeEditor.FLAG_DRAW_WHITESPACE_INNER
 
-            subscribeAlways<KeyBindingEvent> { event ->
-                if (event.eventType == EditorKeyEvent.Type.DOWN) {
-                    toast(
-                        "Keybinding event: " + generateKeybindingString(event),
-                        Toast.LENGTH_LONG
-                    )
+            subscribeAlways(EditorKeyEvent::class.java) {
+                if (it.keyCode == KeyEvent.KEYCODE_S && it.isCtrlPressed) {
+                    toast("Save shortcut pressed")
+                    it.intercept()
                 }
             }
 
-            searcher.replaceOptions = EditorSearcher.ReplaceOptions(true)
-            // Handle span interactions
-            EditorSpanInteractionHandler(this)
-            getComponent<EditorAutoCompletion>()
-                .setEnabledAnimation(true)
-        }
-
-        // Load textmate themes and grammars
-        setupTextmate()
-
-        // Load monarch themes and grammars
-        setupMonarch()
-
-        // Before using Textmate Language, TextmateColorScheme should be applied
-        ensureTextmateTheme()
-
-        // Set editor language to textmate Java
-        val editor = binding.editor
-        val language = TextMateLanguage.create(
-            "source.java", true
-        )
-        editor.setEditorLanguage(language)
-
-        val savedText = savedInstanceState?.getString("text")
-        if (savedText != null) {
-            val textSize = savedInstanceState.getFloat("font.size")
-            if (textSize > 0f) {
-                editor.textSizePx = textSize
+            subscribeAlways(ContentChangeEvent::class.java) {
+                updateBtnState()
+                updatePositionText()
+                // --- Tab Content Update ---
+                if (!isUpdatingTabs) {
+                    val currentIdx = binding.tabLayout.selectedTabPosition
+                    if (currentIdx != -1 && currentIdx < tabs.size) {
+                        tabs[currentIdx].content = text.toString()
+                        saveTabs()
+                    }
+                }
             }
-            editor.setText(savedText)
-            val left = savedInstanceState.getInt("position.left").coerceIn(0, editor.text.length)
-            val right = savedInstanceState.getInt("position.right").coerceIn(0, editor.text.length)
-            val leftPos = editor.text.indexer.getCharPosition(left.coerceAtMost(right))
-            val rightPos = editor.text.indexer.getCharPosition(right.coerceAtLeast(left))
-            editor.setSelectionRegion(
-                leftPos.line,
-                leftPos.column,
-                rightPos.line,
-                rightPos.column,
-                false
-            )
-            editor.scroller.startScroll(
-                savedInstanceState.getInt("scroll.x"),
-                savedInstanceState.getInt("scroll.y"),
-                0,
-                0,
-                0
-            )
-            editor.scroller.abortAnimation()
-            editor.postInvalidate()
-        } else {
-            // Open assets file
-            openAssetsFile("samples/sample.txt")
-        }
 
-        updatePositionText()
-        updateBtnState()
+            subscribeAlways(SelectionChangeEvent::class.java) {
+                updatePositionText()
+            }
 
-        switchThemeIfRequired(this, binding.editor)
-        computeSearchOptions()
-        
-        loadTabs() // تحميل التبويبات المحفوظة
-        setupViewPager()
-        setupTabLayout()
-        
-        // إضافة تبويب افتراضي إذا كانت القائمة فارغة
-        if (tabs.isEmpty()) {
-            addNewTab("New File.java")
-        }
-        
-    } //👉👉onCreate 
+            subscribeAlways(PublishSearchResultEvent::class.java) {
+                updatePositionText()
+            }
 
-    /**
-     * Generate new [SearchOptions] for text searching in editor
-     */
-    private fun computeSearchOptions() {
-        val caseInsensitive = !searchMenu.menu.findItem(R.id.search_option_match_case)!!.isChecked
-        var type = SearchOptions.TYPE_NORMAL
-        val regex = searchMenu.menu.findItem(R.id.search_option_regex)!!.isChecked
-        if (regex) {
-            type = SearchOptions.TYPE_REGULAR_EXPRESSION
+            subscribeAlways(TextSizeChangeEvent::class.java) {
+                toast("Text size changed to ${it.newSize}")
+            }
+
+            subscribeAlways(SideIconClickEvent::class.java) {
+                toast("Side icon clicked at line ${it.line}")
+            }
+
+            subscribeAlways(InlayHintClickEvent::class.java) {
+                toast("Inlay hint clicked: ${it.renderer}")
+            }
+
+            postDelayedInLifecycle(500) {
+                // Setup languages and themes
+                setupLanguages()
+                setupDiagnostics()
+
+                // Default language and theme
+                setEditorLanguage(JavaLanguageV2())
+                colorScheme = SchemeDarcula()
+
+                // Load initial file (Modified to support Tabs)
+                loadTabs()
+                if (tabs.isEmpty()) {
+                    addNewTab("New File.java", "public class Main {\n\n}")
+                } else {
+                    setupTabLayoutUI()
+                }
+            }
         }
-        val wholeWord = searchMenu.menu.findItem(R.id.search_option_whole_word)!!.isChecked
-        if (wholeWord) {
-            type = SearchOptions.TYPE_WHOLE_WORD
-        }
-        searchOptions = SearchOptions(type, caseInsensitive, RegexBackrefGrammar.DEFAULT)
     }
 
-    /**
-     * Commit a text search to editor
-     */
-    private fun tryCommitSearch() {
-        val query = binding.searchEditor.editableText
-        if (query.isNotEmpty()) {
+    // --- Tab System Implementation ---
+
+    private fun loadTabs() {
+        val prefs = getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
+        val json = prefs.getString("saved_tabs", null)
+        if (json != null) {
             try {
-                binding.editor.searcher.search(
-                    query.toString(),
-                    searchOptions
-                )
-            } catch (e: PatternSyntaxException) {
-                // Regex error
+                val type = object : TypeToken<MutableList<EditorTab>>() {}.type
+                val savedTabs: MutableList<EditorTab> = gson.fromJson(json, type)
+                tabs.clear()
+                tabs.addAll(savedTabs)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    private fun saveTabs() {
+        val prefs = getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
+        val json = gson.toJson(tabs)
+        prefs.edit().putString("saved_tabs", json).apply()
+    }
+
+    private fun setupTabLayoutUI() {
+        binding.tabLayout.removeAllTabs()
+        for (tabData in tabs) {
+            binding.tabLayout.addTab(binding.tabLayout.newTab().setText(tabData.title))
+        }
+        
+        binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab?) {
+                tab?.let {
+                    val position = it.position
+                    if (position < tabs.size) {
+                        isUpdatingTabs = true
+                        binding.editor.setText(tabs[position].content)
+                        isUpdatingTabs = false
+                    }
+                }
             }
-        } else {
+            override fun onTabUnselected(tab: TabLayout.Tab?) {}
+            override fun onTabReselected(tab: TabLayout.Tab?) {}
+        })
+
+        // Initial load of first tab
+        if (tabs.isNotEmpty()) {
+            binding.editor.setText(tabs[0].content)
+        }
+
+        binding.tabLayout.post { setupTabLongClicks() }
+    }
+
+    private fun setupTabLongClicks() {
+        val tabStrip = binding.tabLayout.getChildAt(0) as ViewGroup
+        for (i in 0 until tabStrip.childCount) {
+            tabStrip.getChildAt(i).setOnLongClickListener {
+                showTabOptionsDialog(i)
+                true
+            }
+        }
+    }
+
+    private fun addNewTab(title: String, content: String = "") {
+        val newTab = EditorTab(title = title, content = content)
+        tabs.add(newTab)
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(title))
+        binding.tabLayout.selectTab(binding.tabLayout.getTabAt(tabs.size - 1))
+        saveTabs()
+        binding.tabLayout.post { setupTabLongClicks() }
+    }
+
+    private fun showTabOptionsDialog(position: Int) {
+        val options = arrayOf("إعادة تسمية", "حذف التبويب", "تبويب جديد")
+        MaterialAlertDialogBuilder(this)
+            .setTitle("خيارات التبويب: ${tabs[position].title}")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showRenameDialog(position)
+                    1 -> showDeleteConfirmDialog(position)
+                    2 -> showAddNewTabDialog()
+                }
+            }
+            .show()
+    }
+
+    private fun showAddNewTabDialog() {
+        val input = EditText(this)
+        input.hint = "اسم الملف الجديد"
+        MaterialAlertDialogBuilder(this)
+            .setTitle("إضافة تبويب جديد")
+            .setView(input)
+            .setPositiveButton("إضافة") { _, _ ->
+                val name = input.text.toString()
+                if (name.isNotEmpty()) addNewTab(name)
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun showRenameDialog(position: Int) {
+        val input = EditText(this)
+        input.setText(tabs[position].title)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("إعادة تسمية")
+            .setView(input)
+            .setPositiveButton("حفظ") { _, _ ->
+                val newName = input.text.toString()
+                if (newName.isNotEmpty()) {
+                    tabs[position].title = newName
+                    binding.tabLayout.getTabAt(position)?.text = newName
+                    saveTabs()
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun showDeleteConfirmDialog(position: Int) {
+        if (tabs.size <= 1) {
+            toast("لا يمكن حذف آخر تبويب")
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("حذف")
+            .setMessage("هل تريد حذف '${tabs[position].title}'؟")
+            .setPositiveButton("حذف") { _, _ ->
+                tabs.removeAt(position)
+                binding.tabLayout.removeTabAt(position)
+                saveTabs()
+                binding.tabLayout.post { setupTabLongClicks() }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    // --- Original Helper Methods (Preserved) ---
+
+    private fun tryCommitSearch() {
+        val text = binding.searchEditor.text.toString()
+        if (text.isEmpty()) {
             binding.editor.searcher.stopSearch()
-        }
-    }
-
-    /**
-     * Setup Textmate. Load our grammars and themes from assets
-     */
-    private fun setupTextmate() {
-        // Add assets file provider so that files in assets can be loaded
-        FileProviderRegistry.getInstance().addFileProvider(
-            AssetsFileResolver(
-                applicationContext.assets // use application context
-            )
-        )
-        loadDefaultTextMateThemes()
-        loadDefaultTextMateLanguages()
-    }
-
-
-    /**
-     * Load default textmate themes
-     */
-    private /*suspend*/ fun loadDefaultTextMateThemes() /*= withContext(Dispatchers.IO)*/ {
-        val themes = arrayOf("darcula", "ayu-dark", "quietlight", "solarized_dark")
-        val themeRegistry = ThemeRegistry.getInstance()
-        themes.forEach { name ->
-            val path = "textmate/$name.json"
-            themeRegistry.loadTheme(
-                ThemeModel(
-                    IThemeSource.fromInputStream(
-                        FileProviderRegistry.getInstance().tryGetInputStream(path), path, null
-                    ), name
-                ).apply {
-                    if (name != "quietlight") {
-                        isDark = true
-                    }
-                }
-            )
-        }
-
-        themeRegistry.setTheme("quietlight")
-    }
-
-    /**
-     * Load default languages from JSON configuration
-     *
-     * @see loadDefaultLanguagesWithDSL Load by Kotlin DSL
-     */
-    private /*suspend*/ fun loadDefaultTextMateLanguages() /*= withContext(Dispatchers.Main)*/ {
-        GrammarRegistry.getInstance().loadGrammars("textmate/languages.json")
-    }
-
-    /**
-     * Setup monarch. Load our grammars and themes from assets
-     */
-    private fun setupMonarch() {
-        // Add assets file provider so that files in assets can be loaded
-        io.github.rosemoe.sora.langs.monarch.registry.FileProviderRegistry.addProvider(
-            io.github.rosemoe.sora.langs.monarch.registry.provider.AssetsFileResolver(
-                applicationContext.assets // use application context
-            )
-        )
-        loadDefaultMonarchThemes()
-        loadDefaultMonarchLanguages()
-    }
-
-
-    /**
-     * Load default monarch themes
-     *
-     */
-    private /*suspend*/ fun loadDefaultMonarchThemes() /*= withContext(Dispatchers.IO)*/ {
-        val themes = arrayOf("darcula", "ayu-dark", "quietlight", "solarized_dark")
-
-        themes.forEach { name ->
-            val path = "textmate/$name.json"
-            io.github.rosemoe.sora.langs.monarch.registry.ThemeRegistry.loadTheme(
-                io.github.rosemoe.sora.langs.monarch.registry.model.ThemeModel(
-                    ThemeSource(path, name)
-                ).apply {
-                    if (name != "quietlight") {
-                        isDark = true
-                    }
-                }, false
-            )
-        }
-
-        io.github.rosemoe.sora.langs.monarch.registry.ThemeRegistry.setTheme("quietlight")
-    }
-
-    /**
-     * Load default languages from Monarch
-     */
-    private fun loadDefaultMonarchLanguages() {
-        MonarchGrammarRegistry.INSTANCE.loadGrammars(
-            monarchLanguages {
-                language("java") {
-                    monarchLanguage = JavaLanguage
-                    defaultScopeName()
-                    languageConfiguration = "textmate/java/language-configuration.json"
-                }
-                language("kotlin") {
-                    monarchLanguage = KotlinLanguage
-                    defaultScopeName()
-                    languageConfiguration = "textmate/kotlin/language-configuration.json"
-                }
-                language("python") {
-                    monarchLanguage = PythonLanguage
-                    defaultScopeName()
-                    languageConfiguration = "textmate/python/language-configuration.json"
-                }
-                language("typescript") {
-                    monarchLanguage = TypescriptLanguage
-                    defaultScopeName()
-                    languageConfiguration = "textmate/javascript/language-configuration.json"
-                }
+        } else {
+            try {
+                binding.editor.searcher.search(text, searchOptions)
+            } catch (e: PatternSyntaxException) {
+                // Ignore
             }
-        )
+        }
     }
 
-    private fun loadDefaultLanguagesWithDSL() {
-        GrammarRegistry.getInstance().loadGrammars(
+    private fun computeSearchOptions() {
+        val regex = searchMenu.menu.findItem(R.id.search_option_regex).isChecked
+        val matchCase = searchMenu.menu.findItem(R.id.search_option_match_case).isChecked
+        val wholeWord = searchMenu.menu.findItem(R.id.search_option_whole_word).isChecked
+        searchOptions = SearchOptions(regex, matchCase, wholeWord)
+    }
+
+    private fun setupLanguages() {
+        FileProviderRegistry.getInstance().addFileResolver(AssetsFileResolver(assets))
+        GrammarRegistry.getInstance().loadLanguages(
             languages {
                 language("java") {
                     grammar = "textmate/java/syntaxes/java.tmLanguage.json"
@@ -527,7 +475,7 @@ class MainActivity : AppCompatActivity() {
                     languageConfiguration = "textmate/java/language-configuration.json"
                 }
                 language("kotlin") {
-                    grammar = "textmate/kotlin/syntaxes/Kotlin.tmLanguage"
+                    grammar = "textmate/kotlin/syntaxes/Kotlin.tmLanguage.json"
                     defaultScopeName()
                     languageConfiguration = "textmate/kotlin/language-configuration.json"
                 }
@@ -540,20 +488,13 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /**
-     * Re-apply color scheme
-     */
     private fun resetColorScheme() {
         binding.editor.apply {
             val colorScheme = this.colorScheme
-            // reset
             this.colorScheme = colorScheme
         }
     }
 
-    /**
-     * Add diagnostic items to editor. For debug only.
-     */
     private fun setupDiagnostics() {
         val editor = binding.editor
         val container = DiagnosticsContainer()
@@ -570,9 +511,6 @@ class MainActivity : AppCompatActivity() {
         editor.diagnostics = container
     }
 
-    /**
-     * Ensure the editor uses a [TextMateColorScheme]
-     */
     private fun ensureTextmateTheme() {
         val editor = binding.editor
         var editorColorScheme = editor.colorScheme
@@ -582,121 +520,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Ensure the editor uses a [MonarchColorScheme]
-     */
     private fun ensureMonarchTheme() {
         val editor = binding.editor
         var editorColorScheme = editor.colorScheme
         if (editorColorScheme !is MonarchColorScheme) {
-            editorColorScheme =
-                MonarchColorScheme.create(io.github.rosemoe.sora.langs.monarch.registry.ThemeRegistry.currentTheme)
+            editorColorScheme = MonarchColorScheme.create(io.github.rosemoe.sora.langs.monarch.registry.ThemeRegistry.currentTheme)
             editor.colorScheme = editorColorScheme
             switchThemeIfRequired(this, editor)
         }
     }
 
-    private fun generateKeybindingString(event: KeyBindingEvent): String {
-        val sb = StringBuilder()
-        if (event.isCtrlPressed) {
-            sb.append("Ctrl + ")
-        }
-
-        if (event.isAltPressed) {
-            sb.append("Alt + ")
-        }
-
-        if (event.isShiftPressed) {
-            sb.append("Shift + ")
-        }
-
-        sb.append(KeyEvent.keyCodeToString(event.keyCode))
-        return sb.toString()
-    }
-
-    /**
-     * Open file from assets, and set editor text
-     */
-    private fun openAssetsFile(name: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val text = ContentIO.createFrom(assets.open(name))
-            withContext(Dispatchers.Main) {
-                binding.editor.setText(text, null)
-
-                updatePositionText()
-                updateBtnState()
-
-                if ("big_sample" !in name) {
-                    binding.editor.inlayHints = InlayHintsContainer().also {
-                        it.add(ColorInlayHint(10, 30, ConstColor("#f44336")))
-                        it.add(TextInlayHint(29, 7, "^DigitTens"))
-                        it.add(TextInlayHint(100, 1, "^Numbers"))
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Update buttons state for undo/redo
-     */
     private fun updateBtnState() {
         undo?.isEnabled = binding.editor.canUndo()
         redo?.isEnabled = binding.editor.canRedo()
     }
 
-    /**
-     * Update editor position tracker text
-     */
     private fun updatePositionText() {
         val cursor = binding.editor.cursor
-        var text =
-            (1 + cursor.leftLine).toString() + ":" + cursor.leftColumn + ";" + cursor.left + " "
-
+        var text = (1 + cursor.leftLine).toString() + ":" + cursor.leftColumn + ";" + cursor.left + " "
         text += if (cursor.isSelected) {
             "(" + (cursor.right - cursor.left) + " chars)"
         } else {
             val content = binding.editor.text
             if (content.getColumnCount(cursor.leftLine) == cursor.leftColumn) {
                 "(<" + content.getLine(cursor.leftLine).lineSeparator.let {
-                    if (it == LineSeparator.NONE) {
-                        "EOF"
-                    } else {
-                        it.name
-                    }
+                    if (it == LineSeparator.NONE) "EOF" else it.name
                 } + ">)"
             } else {
-                "(" + content.getLine(cursor.leftLine)
-                    .codePointStringAt(cursor.leftColumn)
-                    .escapeCodePointIfNecessary() + ")"
+                "(" + content.getLine(cursor.leftLine).codePointStringAt(cursor.leftColumn).escapeCodePointIfNecessary() + ")"
             }
         }
-
-        // Indicator for text matching
         val searcher = binding.editor.searcher
         if (searcher.hasQuery()) {
             val idx = searcher.currentMatchedPositionIndex
             val count = searcher.matchedPositionCount
-            val matchText = if (count == 0) {
-                "no match"
-            } else if (count == 1) {
-                "1 match"
-            } else {
-                "$count matches"
-            }
-            text += if (idx == -1) {
-                "($matchText)"
-            } else {
-                "(${idx + 1} of $matchText)"
-            }
+            val matchText = if (count == 0) "no match" else if (count == 1) "1 match" else "$count matches"
+            text += if (idx == -1) "($matchText)" else "(${idx + 1} of $matchText)"
         }
-
         binding.positionDisplay.text = text
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.write {
+        outState.apply {
             putString("text", binding.editor.text.toString())
             putFloat("font.size", binding.editor.textSizePx)
             putInt("position.left", binding.editor.cursor.left)
@@ -724,35 +590,9 @@ class MainActivity : AppCompatActivity() {
         when (id) {
             R.id.open_test_activity -> startActivity<TestActivity>()
             R.id.open_paged_edit -> startActivity<PagedEditActivity>()
-            R.id.open_lsp_activity -> {
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle(getString(R.string.not_supported))
-                        .setMessage(getString(R.string.dialog_api_warning_msg))
-                        .setPositiveButton(android.R.string.ok, null)
-                        .show()
-                } else {
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle(R.string.dialog_lsp_entry_title)
-                        .setMessage(R.string.dialog_lsp_entry_msg)
-                        .setPositiveButton(R.string.choice_yes) { _, _ ->
-                            startActivity<LspTestActivity>()
-                        }
-                        .setNegativeButton(R.string.choice_no) { _, _ ->
-                            startActivity<LspTestJavaActivity>()
-                        }
-                        .setNeutralButton(android.R.string.cancel, null)
-                        .show()
-                }
-            }
-
             R.id.text_undo -> editor.undo()
             R.id.text_redo -> editor.redo()
-            R.id.goto_end -> editor.setSelection(
-                editor.text.lineCount - 1,
-                editor.text.getColumnCount(editor.text.lineCount - 1)
-            )
-
+            R.id.goto_end -> editor.setSelection(editor.text.lineCount - 1, editor.text.getColumnCount(editor.text.lineCount - 1))
             R.id.move_up -> editor.moveSelection(SelectionMovement.UP)
             R.id.move_down -> editor.moveSelection(SelectionMovement.DOWN)
             R.id.home -> editor.moveSelection(SelectionMovement.LINE_START)
@@ -763,603 +603,7 @@ class MainActivity : AppCompatActivity() {
                 item.isChecked = !item.isChecked
                 editor.getComponent(Magnifier::class.java).isEnabled = item.isChecked
             }
-
-            R.id.useIcu -> {
-                item.isChecked = !item.isChecked
-                editor.props.useICULibToSelectWords = item.isChecked
-            }
-
-            R.id.ln_panel_fixed -> chooseLineNumberPanelPosition()
-
-            R.id.ln_panel_follow -> {
-                val themes = arrayOf(
-                    getString(R.string.top),
-                    getString(R.string.center),
-                    getString(R.string.bottom)
-                )
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.fixed)
-                    .setSingleChoiceItems(themes, -1) { dialog: DialogInterface, which: Int ->
-                        editor.lnPanelPositionMode = LineInfoPanelPositionMode.FOLLOW
-                        when (which) {
-                            0 -> editor.lnPanelPosition = LineInfoPanelPosition.TOP
-                            1 -> editor.lnPanelPosition = LineInfoPanelPosition.CENTER
-                            2 -> editor.lnPanelPosition = LineInfoPanelPosition.BOTTOM
-                        }
-                        dialog.dismiss()
-                    }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
-            }
-
-            R.id.code_format -> editor.formatCodeAsync()
-            R.id.switch_language -> chooseLanguage()
-            R.id.search_panel_st -> toggleSearchPanel(item)
-
-            R.id.search_am -> {
-                binding.replaceEditor.setText("")
-                binding.searchEditor.setText("")
-                editor.searcher.stopSearch()
-                editor.beginSearchMode()
-            }
-
-            R.id.switch_colors -> chooseTheme()
-
-            R.id.text_wordwrap -> {
-                item.isChecked = !item.isChecked
-                editor.isWordwrap = item.isChecked
-            }
-
-            R.id.completionAnim -> {
-                item.isChecked = !item.isChecked
-                editor.getComponent<EditorAutoCompletion>()
-                    .setEnabledAnimation(item.isChecked)
-            }
-
-            R.id.open_logs -> openLogs()
-            R.id.clear_logs -> clearLogs()
-
-            R.id.editor_line_number -> {
-                editor.isLineNumberEnabled = !editor.isLineNumberEnabled
-                item.isChecked = editor.isLineNumberEnabled
-            }
-
-            R.id.pin_line_number -> {
-                editor.setPinLineNumber(!editor.isLineNumberPinned)
-                item.isChecked = editor.isLineNumberPinned
-            }
-
-            R.id.load_test_file -> {
-                openAssetsFile("samples/big_sample.txt")
-            }
-
-            R.id.softKbdEnabled -> {
-                editor.isSoftKeyboardEnabled = !editor.isSoftKeyboardEnabled
-                item.isChecked = editor.isSoftKeyboardEnabled
-            }
-
-            R.id.disableSoftKbdOnHardKbd -> {
-                editor.isDisableSoftKbdIfHardKbdAvailable =
-                    !editor.isDisableSoftKbdIfHardKbdAvailable
-                item.isChecked = editor.isDisableSoftKbdIfHardKbdAvailable
-            }
-
-            R.id.switch_typeface -> chooseTypeface()
         }
         return super.onOptionsItemSelected(item)
     }
-
-    private fun chooseTypeface() {
-        val fonts = arrayOf(
-            "JetBrains Mono",
-            "Ubuntu",
-            "Roboto"
-        )
-        val assetsPaths = arrayOf(
-            "JetBrainsMono-Regular.ttf",
-            "Ubuntu-Regular.ttf",
-            "Roboto-Regular.ttf"
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle(android.R.string.dialog_alert_title)
-            .setSingleChoiceItems(fonts, -1) { dialog: DialogInterface, which: Int ->
-                if (which in assetsPaths.indices) {
-                    binding.editor.typefaceText =
-                        Typeface.createFromAsset(assets, assetsPaths[which])
-                }
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun chooseLineNumberPanelPosition() {
-        val editor = binding.editor
-        val themes = arrayOf(
-            getString(R.string.top),
-            getString(R.string.bottom),
-            getString(R.string.left),
-            getString(R.string.right),
-            getString(R.string.center),
-            getString(R.string.top_left),
-            getString(R.string.top_right),
-            getString(R.string.bottom_left),
-            getString(R.string.bottom_right)
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.fixed)
-            .setSingleChoiceItems(themes, -1) { dialog: DialogInterface, which: Int ->
-                editor.lnPanelPositionMode = LineInfoPanelPositionMode.FIXED
-                when (which) {
-                    0 -> editor.lnPanelPosition = LineInfoPanelPosition.TOP
-                    1 -> editor.lnPanelPosition = LineInfoPanelPosition.BOTTOM
-                    2 -> editor.lnPanelPosition = LineInfoPanelPosition.LEFT
-                    3 -> editor.lnPanelPosition = LineInfoPanelPosition.RIGHT
-                    4 -> editor.lnPanelPosition = LineInfoPanelPosition.CENTER
-                    5 -> editor.lnPanelPosition =
-                        LineInfoPanelPosition.TOP or LineInfoPanelPosition.LEFT
-
-                    6 -> editor.lnPanelPosition =
-                        LineInfoPanelPosition.TOP or LineInfoPanelPosition.RIGHT
-
-                    7 -> editor.lnPanelPosition =
-                        LineInfoPanelPosition.BOTTOM or LineInfoPanelPosition.LEFT
-
-                    8 -> editor.lnPanelPosition =
-                        LineInfoPanelPosition.BOTTOM or LineInfoPanelPosition.RIGHT
-                }
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun toggleSearchPanel(item: MenuItem) {
-        if (binding.searchPanel.visibility == View.GONE) {
-            binding.apply {
-                replaceEditor.setText("")
-                searchEditor.setText("")
-                editor.searcher.stopSearch()
-                searchPanel.visibility = View.VISIBLE
-                item.isChecked = true
-            }
-        } else {
-            binding.searchPanel.visibility = View.GONE
-            binding.editor.searcher.stopSearch()
-            item.isChecked = false
-        }
-    }
-
-    private fun openLogs() {
-        runCatching {
-            openFileInput(LOG_FILE).reader().readText()
-        }.onSuccess {
-            binding.editor.setText(it)
-        }.onFailure {
-            toast(it.toString())
-        }
-    }
-
-    private fun clearLogs() {
-        runCatching {
-            openFileOutput(LOG_FILE, MODE_PRIVATE)?.use {}
-        }.onFailure {
-            toast(it.toString())
-        }.onSuccess {
-            toast(R.string.deleting_log_success)
-        }
-    }
-
-    private fun chooseLanguage() {
-        val editor = binding.editor
-        val languageOptions = arrayOf(
-            "Java",
-            "TextMate Java",
-            "TextMate Kotlin",
-            "TextMate Python",
-            "TextMate Html",
-            "TextMate JavaScript",
-            "TextMate MarkDown",
-            "TM Language from file",
-            "Tree-sitter Java",
-            "Monarch Java",
-            "Monarch Kotlin",
-            "Monarch Python",
-            "Monarch TypeScript",
-            "Text"
-        )
-        val tmLanguages = mapOf(
-            "TextMate Java" to Pair("source.java", "source.java"),
-            "TextMate Kotlin" to Pair("source.kotlin", "source.kotlin"),
-            "TextMate Python" to Pair("source.java", "source.java"),
-            "TextMate Html" to Pair("text.html.basic", "text.html.basic"),
-            "TextMate JavaScript" to Pair("source.js", "source.js"),
-            "TextMate MarkDown" to Pair("text.html.markdown", "text.html.markdown")
-        )
-
-        val monarchLanguages = mapOf(
-            "Monarch Java" to "source.java",
-            "Monarch Kotlin" to "source.kotlin",
-            "Monarch Python" to "source.python",
-            "Monarch TypeScript" to "source.typescript"
-        )
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.switch_language)
-            .setSingleChoiceItems(languageOptions, -1) { dialog: DialogInterface, which: Int ->
-                when (val selected = languageOptions[which]) {
-                    in tmLanguages -> {
-                        val info = tmLanguages[selected]!!
-                        try {
-                            ensureTextmateTheme()
-                            val editorLanguage = editor.editorLanguage
-                            val language = if (editorLanguage is TextMateLanguage) {
-                                editorLanguage.updateLanguage(info.first)
-                                editorLanguage
-                            } else {
-                                TextMateLanguage.create(info.second, true)
-                            }
-                            editor.setEditorLanguage(language)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
-
-                    in monarchLanguages -> {
-                        val info = monarchLanguages[selected]!!
-
-                        try {
-                            ensureMonarchTheme()
-
-                            val editorLanguage = editor.editorLanguage
-
-                            val language = if (editorLanguage is MonarchLanguage) {
-                                editorLanguage.updateLanguage(info)
-                                editorLanguage
-                            } else {
-                                MonarchLanguage.create(info, true)
-                            }
-                            editor.setEditorLanguage(language)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
-
-                    else -> {
-                        when (selected) {
-                            "Java" -> editor.setEditorLanguage(JavaLanguage())
-                            "Text" -> editor.setEditorLanguage(EmptyLanguage())
-                            "TM Language from file" -> loadTMLLauncher.launch("*/*")
-                            "Tree-sitter Java" -> {
-                                editor.setEditorLanguage(
-                                    TsLanguageJava(
-                                        JavaLanguageSpec(
-                                            highlightScmSource = assets.open("tree-sitter-queries/java/highlights.scm")
-                                                .reader().readText(),
-                                            codeBlocksScmSource = assets.open("tree-sitter-queries/java/blocks.scm")
-                                                .reader().readText(),
-                                            bracketsScmSource = assets.open("tree-sitter-queries/java/brackets.scm")
-                                                .reader().readText(),
-                                            localsScmSource = assets.open("tree-sitter-queries/java/locals.scm")
-                                                .reader().readText()
-                                        )
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun chooseTheme() {
-        val editor = binding.editor
-        val themes = arrayOf(
-            "Default",
-            "GitHub",
-            "Eclipse",
-            "Darcula",
-            "VS2019",
-            "NotepadXX",
-            "QuietLight for TM(VSCode)",
-            "Darcula for TM",
-            "Ayu Dark for VSCode",
-            "Solarized(Dark) for TM(VSCode)",
-            "TM theme from file"
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.color_scheme)
-            .setSingleChoiceItems(themes, -1) { dialog: DialogInterface, which: Int ->
-                when (which) {
-                    0 -> editor.colorScheme = EditorColorScheme()
-                    1 -> editor.colorScheme = SchemeGitHub()
-                    2 -> editor.colorScheme = SchemeEclipse()
-                    3 -> editor.colorScheme = SchemeDarcula()
-                    4 -> editor.colorScheme = SchemeVS2019()
-                    5 -> editor.colorScheme = SchemeNotepadXX()
-                    6 -> try {
-                        ensureTextmateTheme()
-                        ThemeRegistry.getInstance().setTheme("quietlight")
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-
-                    7 -> try {
-                        ensureTextmateTheme()
-                        ThemeRegistry.getInstance().setTheme("darcula")
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-
-                    8 -> try {
-                        ensureTextmateTheme()
-                        ThemeRegistry.getInstance().setTheme("ayu-dark")
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-
-                    9 -> try {
-                        ensureTextmateTheme()
-                        ThemeRegistry.getInstance().setTheme("solarized_dark")
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-
-                    10 -> loadTMTLauncher.launch("*/*")
-                }
-                resetColorScheme()
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    fun gotoNext(view: View) {
-        try {
-            binding.editor.searcher.gotoNext()
-        } catch (e: IllegalStateException) {
-            e.printStackTrace()
-        }
-    }
-
-    fun gotoPrev(view: View) {
-        try {
-            binding.editor.searcher.gotoPrevious()
-        } catch (e: IllegalStateException) {
-            e.printStackTrace()
-        }
-    }
-
-    fun replace(view: View) {
-        try {
-            binding.editor.searcher.replaceCurrentMatch(binding.replaceEditor.text.toString())
-        } catch (e: IllegalStateException) {
-            e.printStackTrace()
-        }
-    }
-
-    fun replaceAll(view: View) {
-        try {
-            binding.editor.searcher.replaceAll(binding.replaceEditor.text.toString())
-        } catch (e: IllegalStateException) {
-            e.printStackTrace()
-        }
-    }
-
-    fun showSearchOptions(view: View) {
-        searchMenu.show()
-    }
-
-    private val loadTMLLauncher = registerForActivityResult(GetContent()) { result: Uri? ->
-        try {
-            if (result == null) return@registerForActivityResult
-
-
-            val editorLanguage = binding.editor.editorLanguage
-
-            val language = if (editorLanguage is TextMateLanguage) {
-                editorLanguage.updateLanguage(
-                    DefaultGrammarDefinition.withGrammarSource(
-                        IGrammarSource.fromInputStream(
-                            contentResolver.openInputStream(result),
-                            result.path, null
-                        ),
-                    )
-                )
-                editorLanguage
-            } else {
-                TextMateLanguage.create(
-                    DefaultGrammarDefinition.withGrammarSource(
-                        IGrammarSource.fromInputStream(
-                            contentResolver.openInputStream(result),
-                            result.path, null
-                        ),
-                    ), true
-                )
-            }
-            binding.editor.setEditorLanguage(language)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private val loadTMTLauncher = registerForActivityResult(GetContent()) { result: Uri? ->
-        try {
-            if (result == null) return@registerForActivityResult
-
-            ensureTextmateTheme()
-
-            ThemeRegistry.getInstance().loadTheme(
-                IThemeSource.fromInputStream(
-                    contentResolver.openInputStream(result), result.path,
-                    null
-                )
-            )
-
-            resetColorScheme()
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-    
-    private fun setupViewPager() {
-        adapter = EditorTabsAdapter(tabs) { position, content ->
-            // تحديث المحتوى عند التغيير لضمان الحفظ
-            if (position >= 0 && position < tabs.size) {
-                tabs[position].content = content
-                saveTabs()
-            }
-        }
-        binding.viewPager.adapter = adapter
-        binding.viewPager.offscreenPageLimit = 5
-    }
-
-    private fun setupTabLayout() {
-        // تم التأكد من وجود استيراد واحد فقط لـ TabLayout لتجنب Ambiguous error
-        TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
-            if (position < tabs.size) {
-                tab.text = tabs[position].title
-            }
-        }.attach()
-
-        // تنفيذ الضغط المطول على التبويبات بعد رسم الواجهة
-        binding.tabLayout.post { setupTabLongClicks() }
-    }
-
-    private fun setupTabLongClicks() {
-        val tabStrip = binding.tabLayout.getChildAt(0) as ViewGroup
-        for (i in 0 until tabStrip.childCount) {
-            tabStrip.getChildAt(i).setOnLongClickListener {
-                showTabOptionsDialog(i)
-                true
-            }
-        }
-    }
-
-    private fun addNewTab(title: String) {
-        val newTab = EditorTab(title = title)
-        tabs.add(newTab)
-        adapter.notifyItemInserted(tabs.size - 1)
-        binding.viewPager.currentItem = tabs.size - 1
-        saveTabs()
-        binding.tabLayout.post { setupTabLongClicks() }
-    }
-
-    private fun showTabOptionsDialog(position: Int) {
-        if (position < 0 || position >= tabs.size) return
-        
-        val options = arrayOf("إعادة تسمية", "حذف التبويب")
-        MaterialAlertDialogBuilder(this)
-            .setTitle("خيارات التبويب: ${tabs[position].title}")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> showRenameDialog(position)
-                    1 -> showDeleteConfirmDialog(position)
-                }
-            }
-            .show()
-    }
-
-    private fun showRenameDialog(position: Int) {
-        val input = EditText(this)
-        input.setText(tabs[position].title)
-        MaterialAlertDialogBuilder(this)
-            .setTitle("إعادة تسمية التبويب")
-            .setView(input)
-            .setPositiveButton("حفظ") { _, _ ->
-                val newName = input.text.toString()
-                if (newName.isNotEmpty()) {
-                    tabs[position].title = newName
-                    binding.tabLayout.getTabAt(position)?.text = newName
-                    saveTabs()
-                }
-            }
-            .setNegativeButton("إلغاء", null)
-            .show()
-    }
-
-    private fun showDeleteConfirmDialog(position: Int) {
-        if (tabs.size <= 1) {
-            Toast.makeText(this, "لا يمكن حذف آخر تبويب", Toast.LENGTH_SHORT).show()
-            return
-        }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("حذف التبويب")
-            .setMessage("هل أنت متأكد من حذف '${tabs[position].title}'؟")
-            .setPositiveButton("حذف") { _, _ ->
-                tabs.removeAt(position)
-                adapter.notifyItemRemoved(position)
-                saveTabs()
-                binding.tabLayout.post { setupTabLongClicks() }
-            }
-            .setNegativeButton("إلغاء", null)
-            .show()
-    }
-
-    private fun saveTabs() {
-        val prefs = getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
-        val json = gson.toJson(tabs)
-        prefs.edit().putString("saved_tabs", json).apply()
-    }
-
-    private fun loadTabs() {
-        val prefs = getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
-        val json = prefs.getString("saved_tabs", null)
-        if (json != null) {
-            try {
-                val type = object : TypeToken<MutableList<EditorTab>>() {}.type
-                val savedTabs: MutableList<EditorTab> = gson.fromJson(json, type)
-                tabs.clear()
-                tabs.addAll(savedTabs)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    inner class EditorTabsAdapter(
-        private val tabsList: List<EditorTab>,
-        private val onContentChanged: (Int, String) -> Unit
-    ) : RecyclerView.Adapter<EditorTabsAdapter.EditorViewHolder>() {
-
-        inner class EditorViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-            val editor: CodeEditor = view.findViewById(R.id.editor)
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EditorViewHolder {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.layout_editor_item, parent, false)
-            return EditorViewHolder(view)
-        }
-
-        override fun onBindViewHolder(holder: EditorViewHolder, position: Int) {
-            val tab = tabsList[position]
-            val editor = holder.editor
-            
-            editor.setText(tab.content)
-            setupEditorConfiguration(editor)
-            
-            editor.subscribeAlways(ContentChangeEvent::class.java) {
-                onContentChanged(holder.adapterPosition, editor.text.toString())
-            }
-        }
-
-        override fun getItemCount(): Int = tabsList.size
-
-        private fun setupEditorConfiguration(editor: CodeEditor) {
-            editor.colorScheme = SchemeDarcula()
-            editor.typefaceText = Typeface.MONOSPACE
-            editor.textSize = 14f
-            editor.setEditorLanguage(JavaLanguage())
-            editor.getComponent(EditorAutoCompletion::class.java).isEnabled = true
-            editor.getComponent(Magnifier::class.java).isEnabled = true
-            editor.isWordwrap = false
-            editor.setOverScrollEnabled(false)
-            editor.setLineNumberEnabled(true)
-        }
-    }
-
 }
