@@ -121,9 +121,25 @@ import org.eclipse.tm4e.core.registry.IGrammarSource
 import org.eclipse.tm4e.core.registry.IThemeSource
 import java.util.regex.PatternSyntaxException
 
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
+//import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.tabs.TabLayout
+//import com.google.android.material.tabs.TabLayoutMediator
+//import com.google.gson.Gson
+//import com.google.gson.reflect.TypeToken
+
 /**
  * Demo and debug Activity for the code editor
  */
+ 
+ // كلاس لتمثيل بيانات التبويب
+data class EditorTab(
+    var id: String = UUID.randomUUID().toString(),
+    var title: String,
+    var content: String = ""
+)
+ 
 class MainActivity : AppCompatActivity() {
 
     companion object {
@@ -303,7 +319,7 @@ class MainActivity : AppCompatActivity() {
             if (textSize > 0f) {
                 editor.textSizePx = textSize
             }
-           // editor.setText(savedText)
+            editor.setText(savedText)
             val left = savedInstanceState.getInt("position.left").coerceIn(0, editor.text.length)
             val right = savedInstanceState.getInt("position.right").coerceIn(0, editor.text.length)
             val leftPos = editor.text.indexer.getCharPosition(left.coerceAtMost(right))
